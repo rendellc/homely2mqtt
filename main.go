@@ -14,11 +14,22 @@ import (
 	"time"
 )
 
-var deviceLookupTable map[string]*homely.Device
+type deviceDescriptor struct {
+	nameMQTT     string
+	sensorType   sensorType
+	locationMQTT *string
+	floor        *string
+	floorMQTT    *string
+	room         *string
+	roomMQTT     *string
+	device       *homely.Device
+}
 
-func lookupDevice(home *homely.Home, deviceID string) (*homely.Device, error) {
+var deviceLookupTable map[string]*deviceDescriptor
+
+func lookupDevice(home *homely.Home, deviceID string) (*deviceDescriptor, error) {
 	if deviceLookupTable == nil {
-		deviceLookupTable = make(map[string]*homely.Device)
+		deviceLookupTable = make(map[string]*deviceDescriptor)
 	}
 
 	// TODO: is this even more efficient than just looping over the devices every time?
@@ -37,13 +48,64 @@ func lookupDevice(home *homely.Home, deviceID string) (*homely.Device, error) {
 	if i < 0 {
 		return nil, fmt.Errorf("cant find deviceID %s in %v", deviceID, home)
 	}
-	dev = &home.Devices[i]
-	deviceLookupTable[deviceID] = dev
-	return dev, nil
+	descriptor := createDeviceDescriptor(&home.Devices[i])
+	deviceLookupTable[deviceID] = &descriptor
+
+	return deviceLookupTable[deviceID], nil
 }
 
 func nameToMqtt(name string) string {
 	return strings.ReplaceAll(strings.ToLower(name), " ", "_")
+}
+
+type sensorType string
+
+const (
+	motionSensor  sensorType = "motion"
+	smokeSensor              = "smoke"
+	entrySensor              = "entry"
+	unknownSensor            = "unknown"
+)
+
+func createDeviceDescriptor(device *homely.Device) deviceDescriptor {
+	desc := deviceDescriptor{}
+	switch {
+	case strings.Contains(device.ModelName, "Motion"): // Alarm Motion Sensor 2
+		desc.sensorType = motionSensor
+	case strings.Contains(device.ModelName, "Smoke"): // Intelligent Smoke Alarm
+		desc.sensorType = smokeSensor
+	case strings.Contains(device.ModelName, "Entry"): // Alarm Entry Sensor 2
+		desc.sensorType = entrySensor
+	default:
+		desc.sensorType = unknownSensor
+	}
+
+	parts := strings.Split(device.Location, " - ") // Floor 0 - Entrance
+	if len(parts) == 2 {
+		desc.floor = &parts[0]
+		desc.room = &parts[1]
+	} else {
+		desc.floor = nil
+		desc.room = nil
+	}
+
+	if desc.floor != nil && desc.room != nil {
+		desc.locationMQTT = new(string)
+		*desc.locationMQTT = nameToMqtt(device.Location)
+	}
+	if desc.floor != nil {
+		desc.floorMQTT = new(string)
+		*desc.floorMQTT = nameToMqtt(*desc.floor)
+	}
+	if desc.room != nil {
+		desc.roomMQTT = new(string)
+		*desc.roomMQTT = nameToMqtt(*desc.room)
+	}
+
+	desc.nameMQTT = nameToMqtt(device.Name)
+	desc.device = device
+
+	return desc
 }
 
 func main() {
@@ -54,9 +116,9 @@ func main() {
 	log.SetOutput(file)
 	defer file.Close()
 
-	broker := flag.String("broker", "pmx-containers.home.arpa:1883", "Broker URL with port")
-	mqttClientID := flag.String("clientID", "homely2mqtt_client", "ID of MQTT client")
-	homelyUser := flag.String("homely-user", "", "Homely username")
+	mqttBroker := flag.String("mqtt-broker", "broker.home.arpa:1883", "Broker URL with port")
+	mqttClientID := flag.String("mqtt-client-id", "homely2mqtt_client", "MQTT client ID")
+	homelyUser := flag.String("homely-username", "", "Homely username")
 	homelyPwd := flag.String("homely-password", "", "Homely password")
 
 	flag.Parse()
@@ -67,16 +129,14 @@ func main() {
 
 	homelyClient := homely.NewClient(*homelyUser, *homelyPwd)
 
-	mqttClient := mqtt.NewClient(*broker, *mqttClientID, "/home/homely")
+	mqttClient := mqtt.NewClient(*mqttBroker, *mqttClientID, "/home/homely")
 	err = mqttClient.Connect()
 	if err != nil {
 		log.Fatalf("cant connect to mqtt broker: %s", err.Error())
 	}
 	defer mqttClient.Disconnect()
 
-	log.Printf("connected to broker")
-
-	err = mqttClient.Publish("test/message", "my message is hello", false)
+	log.Printf("Connected to MQTT broker and Homely API")
 
 	location, err := homelyClient.GetLocation(ctx)
 	if err != nil {
@@ -97,16 +157,35 @@ func main() {
 	pubAlarm := func(state string) { pubHome("alarm", state) }
 
 	pubDevice := func(deviceID string, valueName string, value any) {
-		dev, err := lookupDevice(home, deviceID)
+		descriptor, err := lookupDevice(home, deviceID)
 		if err != nil {
 			log.Printf("unable to lookup device: %s", err.Error())
 			return
 		}
-		devName := nameToMqtt(dev.Name)
 
-		_ = mqttClient.Publish(fmt.Sprintf("location/%s/%s/%s", nameToMqtt(dev.Location), devName, valueName), value, true)
-		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", devName, valueName), value, true)
+		d := descriptor
+		_ = mqttClient.Publish(fmt.Sprintf("location/%s/%s/%s", *d.locationMQTT, d.nameMQTT, valueName), value, true)
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, valueName), value, true)
 		_ = mqttClient.Publish(fmt.Sprintf("%s/%s", deviceID, valueName), value, true)
+	}
+
+	for _, device := range home.Devices {
+		descriptor, err := lookupDevice(home, device.ID)
+		if err != nil {
+			log.Printf("error describing home device: %s", err.Error())
+			continue
+		}
+
+		d := descriptor
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "id"), d.device.ID, true)
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "sensor"), d.sensorType, true)
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "location"), device.Location, true)
+		if d.floor != nil {
+			_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "floor"), *d.floor, true)
+		}
+		if d.room != nil {
+			_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "room"), *d.room, true)
+		}
 	}
 
 	pubAlarm(home.AlarmState)
@@ -124,7 +203,6 @@ func main() {
 		pubAlarm(home.AlarmState)
 	}
 
-	err = mqttClient.Publish("homely2mqtt", "connecting to streaming api", false)
 	go homelyClient.ConnectHome(ctx, home.LocationID, deviceChanged, alarmChanged)
 
 	for {
