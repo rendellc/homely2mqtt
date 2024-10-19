@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"os/signal"
 	"rendellc/homely2mqtt/homely"
@@ -108,29 +108,33 @@ func createDeviceDescriptor(device *homely.Device) deviceDescriptor {
 	return desc
 }
 
-func main() {
-	file, err := os.OpenFile("app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("unable to create logfile")
+// Lookup environment variable, if it is not present
+// then crash the application
+func requireEnvVar(name string) string {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		log.Fatalf("can't find required environment variable %s", name)
 	}
-	log.SetOutput(file)
-	defer file.Close()
 
-	mqttBroker := flag.String("mqtt-broker", "broker.home.arpa:1883", "Broker URL with port")
-	mqttClientID := flag.String("mqtt-client-id", "homely2mqtt_client", "MQTT client ID")
-	homelyUser := flag.String("homely-username", "", "Homely username")
-	homelyPwd := flag.String("homely-password", "", "Homely password")
+	return value
+}
 
-	flag.Parse()
+func main() {
+	mqttBrokerUrl := requireEnvVar("MQTT_BROKER_URL")
+	mqttClientName := requireEnvVar("MQTT_CLIENT_NAME")
+	homelyUser := requireEnvVar("HOMELY_USER")
+	homelyPwd := requireEnvVar("HOMELY_PASSWORD")
+
+	mqttClientID := fmt.Sprintf("%s_%d", mqttClientName, rand.IntN(1000))
 
 	log.Printf("creating homely api client")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	homelyClient := homely.NewClient(*homelyUser, *homelyPwd)
+	homelyClient := homely.NewClient(homelyUser, homelyPwd)
 
-	mqttClient := mqtt.NewClient(*mqttBroker, *mqttClientID, "/home/homely")
-	err = mqttClient.Connect()
+	mqttClient := mqtt.NewClient(mqttBrokerUrl, mqttClientID, "/home/homely")
+	err := mqttClient.Connect()
 	if err != nil {
 		log.Fatalf("cant connect to mqtt broker: %s", err.Error())
 	}
