@@ -181,6 +181,7 @@ func main() {
 		}
 
 		d := descriptor
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "name"), d.device.Name, true)
 		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "id"), d.device.ID, true)
 		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "sensor"), d.sensorType, true)
 		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "location"), device.Location, true)
