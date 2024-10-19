@@ -120,8 +120,7 @@ type EventDeviceStateChanged struct {
 }
 
 type EventAlarmStateChanged struct {
-	DeviceID  string
-	UserName  string
-	State     string
-	Timestamp time.Time
+	DeviceID string
+	UserName string
+	State    string
 }

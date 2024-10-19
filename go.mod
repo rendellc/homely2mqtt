@@ -5,7 +5,6 @@ go 1.23.2
 require (
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/graarh/golang-socketio v0.0.0-20170510162725-2c44953b9b5f
-	github.com/mitchellh/mapstructure v1.5.0
 	golang.org/x/oauth2 v0.23.0
 )
 
