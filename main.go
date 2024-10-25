@@ -208,11 +208,22 @@ func main() {
 		pubAlarm(home.AlarmState)
 	}
 
-	go homelyClient.ConnectHome(ctx, home.LocationID, deviceChanged, alarmChanged)
+	connectReturnCode := make(chan error)
+	go func() {
+		err := homelyClient.ConnectHome(ctx, home.LocationID, deviceChanged, alarmChanged)
+		connectReturnCode <- err
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case err := <-connectReturnCode:
+			if err != nil {
+				log.Printf("connect error return: %s", err.Error())
+				return
+			}
+			log.Printf("connection closed without error")
 			return
 		}
 	}
