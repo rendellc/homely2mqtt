@@ -4,15 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	paho "github.com/eclipse/paho.mqtt.golang"
 )
 
 type Client struct {
-	topicRoot string
-	opts      *paho.ClientOptions
-	client    paho.Client
-	tokens    []paho.Token
+	topicRoot    string
+	opts         *paho.ClientOptions
+	client       paho.Client
+	tokens       []paho.Token
+	lastsenttime time.Time
 }
 
 func NewClient(brokerURL string, clientID string, topicRoot string) *Client {
@@ -45,7 +47,7 @@ func (c *Client) Disconnect() {
 	c.client.Disconnect(250)
 }
 
-func (c *Client) Publish(topic string, payload any, retained bool) error {
+func (c *Client) Publish(topic string, payload any) error {
 	if c.client == nil {
 		return fmt.Errorf("client not connected")
 	}
@@ -62,7 +64,8 @@ func (c *Client) Publish(topic string, payload any, retained bool) error {
 	if err != nil {
 		return fmt.Errorf("unable to encode payload")
 	}
-
+	c.lastsenttime = time.Now()
+	retained := true
 	token := c.client.Publish(scopedTopic, 0, retained, payloadBytes)
 	go func() {
 		token.Wait()
@@ -73,4 +76,8 @@ func (c *Client) Publish(topic string, payload any, retained bool) error {
 	}()
 
 	return nil
+}
+
+func (c Client) LastSentTime() time.Time {
+	return c.lastsenttime
 }

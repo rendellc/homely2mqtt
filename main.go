@@ -153,13 +153,12 @@ func main() {
 	}
 
 	pubHome := func(name string, value any) {
-		err := mqttClient.Publish(fmt.Sprintf("home/%s", name), value, true)
+		err := mqttClient.Publish(fmt.Sprintf("home/%s", name), value)
 		if err != nil {
 			log.Printf("unable to publish home value: %s", err.Error())
 		}
 	}
 	pubAlarm := func(state string) { pubHome("alarm", state) }
-
 	pubDevice := func(deviceID string, valueName string, value any) {
 		descriptor, err := lookupDevice(home, deviceID)
 		if err != nil {
@@ -168,9 +167,9 @@ func main() {
 		}
 
 		d := descriptor
-		_ = mqttClient.Publish(fmt.Sprintf("location/%s/%s/%s", *d.locationMQTT, d.nameMQTT, valueName), value, true)
-		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, valueName), value, true)
-		_ = mqttClient.Publish(fmt.Sprintf("%s/%s", deviceID, valueName), value, true)
+		_ = mqttClient.Publish(fmt.Sprintf("location/%s/%s/%s", *d.locationMQTT, d.nameMQTT, valueName), value)
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, valueName), value)
+		_ = mqttClient.Publish(fmt.Sprintf("%s/%s", deviceID, valueName), value)
 	}
 
 	for _, device := range home.Devices {
@@ -181,15 +180,15 @@ func main() {
 		}
 
 		d := descriptor
-		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "name"), d.device.Name, true)
-		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "id"), d.device.ID, true)
-		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "sensor"), d.sensorType, true)
-		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "location"), device.Location, true)
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "name"), d.device.Name)
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "id"), d.device.ID)
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "sensor"), d.sensorType)
+		_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "location"), device.Location)
 		if d.floor != nil {
-			_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "floor"), *d.floor, true)
+			_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "floor"), *d.floor)
 		}
 		if d.room != nil {
-			_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "room"), *d.room, true)
+			_ = mqttClient.Publish(fmt.Sprintf("device/%s/%s", d.nameMQTT, "room"), *d.room)
 		}
 	}
 
@@ -214,10 +213,14 @@ func main() {
 		connectReturnCode <- err
 	}()
 
+	heartbeatTicker := time.NewTicker(30 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeatTicker.C:
+			mqttClient.Publish("homely2mqtt/lastupdate", mqttClient.LastSentTime())
+
 		case err := <-connectReturnCode:
 			if err != nil {
 				log.Printf("connect error return: %s", err.Error())
